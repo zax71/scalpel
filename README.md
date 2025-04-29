@@ -20,7 +20,7 @@ You should already have secrets provisioning set up using, e.g., [sops-nix](http
 
 Given a NixOS system configuration `sys = nixpkgs.lib.nixosSystem { ... }` we can derive a new configuration from it by calling `extendModules`. The interesting part is that we can now use `sys` and all the values inside of it in the new modules, e.g.:
 
-```
+```nix
     newsys = sys.extendModules {
         modules = [ ... ];
         specialArgs = { prev = sys; };
@@ -29,8 +29,8 @@ Given a NixOS system configuration `sys = nixpkgs.lib.nixosSystem { ... }` we ca
 
 What makes this so interesting is that you can replace a value in a module while taking reference to its previous value. Something that would previously end you up in an infinite recursion:
 
-```
-    environment.etc."test.cfg".text = ''${prev.config.environment.etc."test.cfg".text} more text here afterwards'';
+```nix
+environment.etc."test.cfg".text = ''${prev.config.environment.etc."test.cfg".text} more text here afterwards'';
 ```
 
 This can be used to extract the names of configuration files from systemd service configurations and later inject different names back into them.
@@ -44,7 +44,7 @@ In the example, we will securely provision bridge-passwords for Mosquitto.
 
 Create your Mosquitto config as usual. But use placeholders sandwiched between `!!` to name your secrets.
 
-```
+```nix
   services.mosquitto = {
     enable = true;
     listeners = [
@@ -73,7 +73,7 @@ Create your Mosquitto config as usual. But use placeholders sandwiched between `
 
 Also, you will configure your favorite secrets provisioning tool here to ensure that the secrets are later available at runtime:
 
-```
+```nix
   sops.secrets.br1passwd = {};
   sops.secrets.br2passwd = {};
 ```
@@ -82,7 +82,7 @@ Also, you will configure your favorite secrets provisioning tool here to ensure 
 <details>
 <summary><b>2. Create a derived system to add secret-provisioning module</b></summary>
 
-```
+```nix
   nixosConfigurations = let
     base_sys = nixpkgs.lib.nixosSystem {
       system = "x86_64-linux";
@@ -108,7 +108,7 @@ Also, you will configure your favorite secrets provisioning tool here to ensure 
 
 This is the part that is specific to each service. You will need to do some investigation to figure out how the configuration is passed to the service. Firstly, extract the path of the generated config file:
 
-```
+```nix
 let
   start = "${prev.config.systemd.services.mosquitto.serviceConfig.ExecStart}";
   mosquitto_cfgfile = builtins.head (builtins.match ".*-c ([^[:space:]]+)" "${start}");
@@ -118,7 +118,7 @@ in
 
 Now, create a transformator to replace the secret placeholders in this file:
 
-```
+```nix
   scalpel.trafos."mosquitto.conf" = {
     source = mosquitto_cfgfile;
     matchers."BR1_PASSWORD".secret = config.sops.secrets.br1passwd.path;
@@ -130,8 +130,8 @@ Now, create a transformator to replace the secret placeholders in this file:
 ```
 
 Finally, replace the configuraton file with the newly created one:
-
-```
+nix
+```nix
   systemd.services.mosquitto.serviceConfig.ExecStart = lib.mkForce (
     builtins.replaceStrings [ "${mosquitto_cfgfile}" ] [ "${config.scalpel.trafos."mosquitto.conf".destination} "] "${start}"
   );
@@ -146,7 +146,7 @@ WARNING: THIS CONTAINER USES PUBLICALLY KNOWN PRIVATE KEYS. DO NOT USE THEM IN Y
 
 To quickly test the example, you can run it as a NixOS container after cloning the Flake.
 
-```
+```nix
 sudo nixos-container create em --flake .#exampleContainer
 sudo nixos-container start em
 sudo machinectl shell em
@@ -154,14 +154,14 @@ sudo machinectl shell em
 
 Inside the container, we can see the changes in action:
 
-```
-$ systemctl cat mosquitto | grep ExecStart
+```console
+user@example:~$ systemctl cat mosquitto | grep ExecStart
 ExecStart=/nix/store/jd00fshpzdc8mm1gqf2x8s7pkb8yb8nj-mosquitto-2.0.14/bin/mosquitto -c /run/scalpel/mosquitto.conf
 
-$ ls -la /run/scalpel/
+user@example:~$ ls -la /run/scalpel/
 -r--r-----  1 mosquitto mosquitto 373 Jun 18 17:10 mosquitto.conf
 
-$ cat /run/scalpel/mosquitto.conf
+user@example:~$ cat /run/scalpel/mosquitto.conf
 [...]
 connection br1
 addresses 127.0.0.2:1883
